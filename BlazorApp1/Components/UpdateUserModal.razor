@@ -1,0 +1,92 @@
+﻿@using BlazorApp1.Domain;
+@using Microsoft.AspNetCore.Identity;
+@using System.Security.Claims;
+
+@inject UserManager<ApplicationUser> UserManager;
+
+<!-- Add this modal to your component -->
+<div class="modal @modalClass" id="updateUserModal" tabindex="-1" role="dialog" aria-labelledby="updateModalLabel" style="display:@modalDisplay; overflow-y: auto;">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="updateModalLabel">Update User</h5>
+            </div>
+            <div class="modal-body">
+                <!-- Create a form here with input fields for updating user properties -->
+                <form>
+                    <div class="form-group">
+                        <label for="username">Username</label>
+                        <input value="@Username" type="text" class="form-control" id="username" placeholder="Username"
+                               @oninput="UpdateUsername" />
+                        <label for="email">Email</label>
+                        <input value="@Email" type="text" class="form-control" id="email" placeholder="Email"
+                            @oninput="UpdateEmail" />
+                    </div>
+                    <!-- Add more input fields for other properties to update -->
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal" @onclick="() => Close()">Close</button>
+                <button type="button" class="btn btn-primary" @onclick="async () => await UpdateUser()">Save changes</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (showBackdrop)
+{
+    <div class="modal-backdrop fade show"></div>
+}
+
+@code {
+    private ApplicationUser User { get; set; }
+    string Username { get; set; } = String.Empty;
+    string Email { get; set; } = String.Empty;
+
+    private bool showBackdrop = false;
+    private string modalClass = "";
+    private string modalDisplay = "none;";
+
+    private void UpdateUsername(ChangeEventArgs e)
+    {
+        Username = e.Value.ToString();
+    }
+
+    private void UpdateEmail(ChangeEventArgs e)
+    {
+        Email = e.Value.ToString();
+    }
+
+    private async Task UpdateUser()
+    {
+        User.Email = Email;
+        User.UserName = Username;
+
+        await UserManager.UpdateAsync(User);
+        Close();
+    }
+
+    public async Task Open(ApplicationUser user)
+    {
+        Username = user.UserName;
+        Email = user.Email;
+        User = user;
+        modalDisplay = "block;";
+        modalClass = "show";
+        showBackdrop = true;
+        await Task.Delay(100);
+        StateHasChanged();
+    }
+
+    public void Close()
+    {
+        modalDisplay = "none";
+        modalClass = "";
+        showBackdrop = false;
+        User = null;
+        Email = String.Empty;
+        Username = String.Empty;
+        StateHasChanged();
+    }
+
+}

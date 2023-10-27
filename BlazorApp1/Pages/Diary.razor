@@ -1,0 +1,159 @@
+﻿@page "/diary"
+@using BlazorApp1.Data;
+@using BlazorApp1.Domain;
+@using Microsoft.AspNetCore.Identity;
+@using System.Security.Claims;
+@using System.Security.Cryptography;
+@using Microsoft.EntityFrameworkCore;
+
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject DbContextOptions<ApplicationDbContext> dbContextOptions;
+@inject UserManager<ApplicationUser> UserManager;
+@inject EncryptionHelper EncryptionHelper;
+
+<div class="container mt-5">
+    <h1 class="mb-4">Text Editor</h1>
+
+    <!-- Display user's existing diaries above the text area -->
+    @if (UsersDiaries.Any())
+    {
+        <div class="row">
+            @foreach (var diary in UsersDiaries)
+            {
+                <div class="col-md-3 mb-3">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title">@diary.DiaryName</h5>
+                            <button class="btn btn-primary" @onclick="async () => await RetriveFile(diary.Id)">Resume</button>
+                            <button class="btn btn-danger" @onclick="async () => await DeleteTargetedDiaray(diary)">Delete</button>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+        <hr /> <!-- Add a horizontal line to separate diaries from the text area -->
+    }
+
+    <div class="form-group">
+        <label for="diaryName">Diary Name:</label>
+        <input type="text" class="form-control" id="diaryName" @bind="DiaryName">
+    </div>
+    <div class="form-group">
+        <label for="textEditor">Diary Text:</label>
+        <textarea class="form-control" rows="10" id="textEditor" @oninput="UpdateDiary" @bind="DiaryText"></textarea>
+    </div>
+    <div class="text-center mt-4">
+        <button class="btn btn-primary" @onclick="async () => await SaveAndWriteToFile()">Save</button>
+    </div>
+</div>
+
+@code {
+
+    private ClaimsPrincipal? ClaimsUser { get; set; }
+    private ApplicationUser User { get; set; }
+
+    private List<DiaryTable> UsersDiaries = new();
+    private DiaryTable CurrentDiaray = new();
+
+    private string DiaryName { get; set; } = String.Empty;
+    private string DiaryText { get; set; } = String.Empty;
+
+    private readonly string DiaryStorePath = @"C:\Users\nikol\source\repos\BlazorApp1\DiaryStore\";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        ClaimsUser = authState.User.Identity.IsAuthenticated ? authState.User : null;
+
+        if (ClaimsUser != null)
+        {
+            User = await UserManager.GetUserAsync(ClaimsUser)
+                                ?? throw new NullReferenceException(nameof(User) + "user is null in diary"); ;
+            UsersDiaries = await RetriveUserDiaries(User.Id);
+        }
+    }
+
+    private void UpdateDiary(ChangeEventArgs e)
+    {
+        DiaryText = e.Value.ToString();
+    }
+
+    private async Task DeleteTargetedDiaray(DiaryTable diary)
+    {
+        using var dbContext = new ApplicationDbContext(dbContextOptions);
+        dbContext.DiaryConfig.Remove(diary);
+        await dbContext.SaveChangesAsync();
+        UsersDiaries = await RetriveUserDiaries(User.Id);
+        StateHasChanged();
+    }
+
+    private async Task SaveAndWriteToFile()
+    {
+        using var dbContext = new ApplicationDbContext(dbContextOptions);
+        var writePath = DiaryStorePath + DiaryName + ".txt";
+
+        var existingDiary = UsersDiaries.FirstOrDefault(d => d.DiaryName == DiaryName);
+
+        if (existingDiary is null)
+        {
+            using AesManaged aes = new AesManaged();
+            aes.GenerateKey();
+            aes.GenerateIV();
+
+            byte[] encrypted = EncryptionHelper.Encrypt(DiaryText, aes.Key, aes.IV);
+
+            await File.WriteAllBytesAsync(writePath, encrypted);
+
+            var newDiary = new DiaryTable
+                {
+                    Id = Guid.NewGuid(),
+                    DiaryName = DiaryName,
+                    Key = aes.Key,
+                    IV = aes.IV,
+                    ApplicationUserId = User.Id,
+                };
+
+            await dbContext.DiaryConfig.AddAsync(newDiary);
+        }
+        else
+        {
+            // This is an existing diary, use the stored key and IV for encryption
+            byte[] encrypted = EncryptionHelper.Encrypt(DiaryText, existingDiary.Key, existingDiary.IV);
+            await File.WriteAllBytesAsync(writePath, encrypted);
+        }
+
+        // Reset values
+        CurrentDiaray = null;
+        DiaryName = String.Empty;
+        DiaryText = String.Empty;
+        await dbContext.SaveChangesAsync();
+        UsersDiaries = await RetriveUserDiaries(User.Id);
+        StateHasChanged();
+    }
+
+    private async Task RetriveFile(Guid id)
+    {
+        var item = UsersDiaries.SingleOrDefault(x => x.Id == id);
+
+        try
+        {
+            var readPath = DiaryStorePath + item.DiaryName + ".txt";
+            var encryptedContent = await File.ReadAllBytesAsync(readPath);
+            DiaryText = EncryptionHelper.Decrypt(encryptedContent, item.Key, item.IV);
+            DiaryName = item.DiaryName;
+            CurrentDiaray = item;
+            StateHasChanged();
+        }catch(Exception ex)
+        {
+            // Console.WriteLine("icomming Item: {key},  {IV},  {diaryname}", item.Key, item.IV, item.DiaryName);
+            // Console.WriteLine("Current: {key},  {IV},  {diaryname}", CurrentDiaray.Key, CurrentDiaray.IV, DiaryName);
+            Console.WriteLine(ex.Message);
+        }
+    }
+
+    private async Task<List<DiaryTable>> RetriveUserDiaries(string id)
+    {
+        using var dbContext = new ApplicationDbContext(dbContextOptions);
+        return await dbContext.DiaryConfig.Where(x => x.ApplicationUserId == id).ToListAsync();
+    }
+}

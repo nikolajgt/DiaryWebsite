@@ -1,0 +1,113 @@
+﻿@page "/"
+@using BlazorApp1.Data;
+@using BlazorApp1.Domain;
+@using System.Security.Claims;
+@using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
+@using Microsoft.AspNetCore.Identity;
+@using Microsoft.EntityFrameworkCore;
+@using BlazorApp1.Components;
+
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject UserManager<ApplicationUser> UserManager;
+@inject DbContextOptions<ApplicationDbContext> dbContextOptions;
+<PageTitle>Index</PageTitle>
+
+
+<AuthorizeView>
+    <Authorized >
+        @if (ClaimsUser?.IsInRole("Admin") ?? false)
+        {
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th scope="col">#</th>
+                        <th scope="col">Username</th>
+                        <th scope="col">Email</th>
+                        <th scope="col">Admin</th>
+                        <th scope="col"></th>
+                        <th scope="col"></th>
+
+                    </tr>
+                </thead>
+                <tbody>
+                @{
+                    int rowNumber = 1; 
+                    foreach (var (user, role) in identityUsers)
+                    {
+                        <tr>
+                           <th scope="row">@rowNumber</th>
+                           <td>@user.UserName</td>
+                           <td>@user.Email</td>
+                           <td>@role</td>
+                           <td>
+                               <UpdateUserModal @ref="UpdateModal"></UpdateUserModal>
+                               <button type="button" class="btn btn-warning" data-toggle="modal" @onclick="() => UpdateUser(user.Id)">
+                                   Update
+                               </button>
+                           </td>
+                           <td><button type="button" class="btn btn-danger" @onclick="() => DeleteUser(user.Id)" >Delete</button></td>
+                        </tr>
+                        rowNumber++;
+                    }
+                }
+                </tbody>
+            </table>
+        }
+        else
+        {
+            <p>Welcome back User: </p> @ClaimsUser?.Identity?.Name
+            ;
+        }
+    </Authorized>
+    <NotAuthorized>
+        <p>Not authorized</p>
+    </NotAuthorized>
+</AuthorizeView>
+
+
+
+
+@code {
+    private ClaimsPrincipal? ClaimsUser { get; set; }
+    private List<(ApplicationUser, string?)>? identityUsers = new List<(ApplicationUser, string?)>();
+
+    private UpdateUserModal UpdateModal { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await GetState();
+    }
+
+    private async Task GetState()
+    {
+        using var dbContext = new ApplicationDbContext(dbContextOptions);
+
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        ClaimsUser = authState.User.Identity.IsAuthenticated ? authState.User : null;
+        var users = await dbContext.Users.AsNoTracking().ToListAsync();
+
+        foreach (var user in users)
+        {
+            var roles = await UserManager.GetRolesAsync(user);
+            var roleName = roles.FirstOrDefault();
+            identityUsers.Add((user, roleName));
+        }
+        StateHasChanged();
+    }
+
+    private async Task UpdateUser(String id)
+    {
+        var user = identityUsers.SingleOrDefault(x => x.Item1.Id == id);
+        await UpdateModal.Open(user.Item1);
+        StateHasChanged();
+    }
+
+    private async Task DeleteUser(string id)
+    {
+        var user = identityUsers.SingleOrDefault(x => x.Item1.Id == id);
+        await UserManager.DeleteAsync(user.Item1);
+        identityUsers.Remove(user);
+        StateHasChanged();
+    }
+
+}
